@@ -1,18 +1,22 @@
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 from sklearn.base import BaseEstimator
 from sklearn.datasets import make_classification, make_regression, load_digits, load_boston
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import accuracy_score, mean_squared_error
+from scipy.stats import entropy
 
 RANDOM_STATE = 17
 
 
-def entropy(y):
+def entr(y):
+    return entropy(y)
     e = 0
     for v in y:
         e += -v * np.log2(v)
     return e
+
 
 def gini(y):
     sum = 0
@@ -29,6 +33,9 @@ def mad_median(y):
     pass
 
 
+node_counter = 0
+
+
 class Node():
 
     def __init__(self, feature_idx=0, threshold=0, labels=None, left=None, right=None):
@@ -37,9 +44,12 @@ class Node():
         self.labels = labels
         self.left = left
         self.right = right
+        self.counter = -1
 
     def __str__(self):
-        return 'feature index = {0},threshold ={1},[{2},{3}]'.format(self.feature_idx, self.threshold, len((self.left)), len((self.right)))
+        return 'feature index = {0},threshold ={1},[{2},{3}]'.format(self.feature_idx, self.threshold, len((self.left)),
+                                                                     len((self.right)))
+
 
 class DecisionTree(BaseEstimator):
 
@@ -74,68 +84,75 @@ class DecisionTree(BaseEstimator):
         self.left_child = None
         self.right_child = None
         self.root_node = None
+        self.debug = debug
 
     def fit(self, X, y):
+        global node_counter
 
-        if len(y) < self.min_samples_split:
-            tree = DecisionTree()
-            tree.root_node = Node(-1, -1, None, y, [0])
-            tree.right_child = None
-            tree.left_child = None
-            return tree
-
-        if X.shape[0] == 0:
-            return None
+        assert not len(y) < self.min_samples_split, "len(y) < self.min_samples_split"
 
         max_q = float("-inf")
-        best_split_value = None
-        best_feature = None
+
+        best_split_value = 0#default
+        best_feature = 0#default
 
         for f in range(X.shape[1]):
             x_col = X[:, f]
-            # if np.max(x_col) == np.min(x_col):
-            #    continue
             splits = self._find_splits(x_col)
+            if len(splits) == 0:
+                continue
 
-            # print('splits len {0}'.format(len(splits)))
+
+
             for spl in splits:
 
-                # разбиваю данные по нацлучшему критерию
-                q,_,_ = self._regression_var_criterion(X, f, y, spl)
+                # разбиваю данные по нацлучшему критерию для данного признака
+                q, _, _ = self._regression_var_criterion(X, f, y, spl)
                 if q > max_q:
                     max_q = q
                     best_feature = f
                     best_split_value = spl
-
-        if best_feature is None:
-            return None
 
         X_left, X_right, y_l, y_r = self._get_data_split(X, y, best_feature, best_split_value)
 
         assert X_left is not None
         assert X_right is not None
 
+        if len(y_l) < self.min_samples_split or len(y_r) < self.min_samples_split:
+            self.left_child = None
+            self.right_child = None
+            self.root_node = Node(best_feature, best_split_value, 'leaf', y_l, y_r)
+            self.root_node.counter = node_counter
+            node_counter += 1
+            return self
+
         if self.max_depth == 0:
-            tree = DecisionTree()
-            tree.root_node = Node(best_feature, best_split_value, None, y_l, y_r)
-            tree.left_child = None
-            tree.right_child = None
-            return tree
+            self.root_node = Node(best_feature, best_split_value, 'leaf', y_l, y_r)
+            self.root_node.counter = node_counter
+            node_counter += 1
+            self.left_child = None
+            self.right_child = None
+            return self
 
         new_depth = self.max_depth
         if new_depth != np.inf:
             new_depth -= 1
-        print("call left branch with X_left.shape = {0}, len(y_l) = {1}".format(X_left.shape, len(y_l)))
+
+        if self.debug:
+            print("call left branch with X_left.shape = {0}, len(y_l) = {1}".format(X_left.shape, len(y_l)))
 
         left_tree = DecisionTree(max_depth=new_depth, min_samples_split=self.min_samples_split,
-                                 criterion=self.criterion)
+                                 criterion=self.criterion, debug=self.debug)
         self.left_child = left_tree.fit(X_left, y_l)
-        print("call right branch with X_right.shape = {0}, len(y_r) = {1}".format(X_right.shape, len(y_r)))
+
+        if self.debug:
+            print("call right branch with X_right.shape = {0}, len(y_r) = {1}".format(X_right.shape, len(y_r)))
+
         right_tree = DecisionTree(max_depth=new_depth, min_samples_split=self.min_samples_split,
-                                  criterion=self.criterion)
+                                  criterion=self.criterion, debug=self.debug)
         self.right_child = right_tree.fit(X_right, y_r)
 
-        self.root_node = Node(np.where(X.shape[1] == best_feature)[0], best_split_value, str(best_feature), y_l, y_r)
+        self.root_node = Node(best_feature, best_split_value, str(best_feature), y_l, y_r)
 
         return self
 
@@ -144,25 +161,63 @@ class DecisionTree(BaseEstimator):
         predictions = []
         for x in X:
 
-            cur_node = self.root_node
-            leaf = cur_node
-            while cur_node is not None:
+            cur_tree = self
+            leaf = cur_tree.root_node
+            while cur_tree is not None:
 
-                leaf = cur_node
-                if x[cur_node.feature_idx] < cur_node.threshold:
-                    cur_node = cur_node.left_child
+                leaf = cur_tree.root_node
+
+                assert leaf is not None, "leaf.root_node is not None"
+
+                if x[cur_tree.root_node.feature_idx] < cur_tree.root_node.threshold:
+                    cur_tree = cur_tree.left_child
                 else:
-                    cur_node = cur_node.right_child
+                    cur_tree = cur_tree.right_child
 
+            assert leaf is not None, "leaf is not None"
+            #            assert leaf.labels == 'leaf', "leaf.labels =='leaf'"
+
+            if isinstance(x, pd.DataFrame):
                 type = X.dtypes[leaf.feature_idx]
                 if type == 'object':
                     predictions.append(self.most_frequent(np.append(leaf.left, leaf.right)))
                 else:
                     predictions.append(np.mean(np.append(leaf.left, leaf.right)))
+            else:
+                predictions.append(self._most_frequent(list(np.append(leaf.left, leaf.right))))
         return predictions
 
+    def predict_leaf_number(self, x):
+        predictions = []
+
+        cur_tree = self
+        leaf = cur_tree.root_node
+        while cur_tree is not None:
+
+            leaf = cur_tree.root_node
+
+            assert leaf is not None, "leaf.root_node is not None"
+
+            if x[cur_tree.root_node.feature_idx] < cur_tree.root_node.threshold:
+                cur_tree = cur_tree.left_child
+            else:
+                cur_tree = cur_tree.right_child
+
+        assert leaf is not None, "leaf is not None"
+        assert leaf.labels == 'leaf', "leaf.labels =='leaf'"
+        assert leaf.counter >= 0, "leaf.counter >= 0"
+        return leaf.counter
+
     def predict_proba(self, X):
-        pass
+        K = self.count_leafs()
+        result = []
+        i = 0
+        for x in X:
+            num = self.predict_leaf_number(x)
+            t = np.zeros(K)
+            t[num] = 1
+            result.append(t)
+        return np.reshape(result, (X.shape[0], K))
 
     def _find_splits(self, X):
         """Find all possible split values."""
@@ -177,8 +232,8 @@ class DecisionTree(BaseEstimator):
 
         return list(split_values)
 
-    def most_frequent(List):
-        return max(set(List), key=List.count)
+    def _most_frequent(self, lst):
+        return max(set(lst), key=lst.count)
 
     def _regression_var_criterion(self, X, feature, y, t):
         x_col_values = X[:, feature]
@@ -197,7 +252,7 @@ class DecisionTree(BaseEstimator):
 
     def _get_data_split(self, X, y, feature, threshold):
 
-        x_col_values = X[:,feature]  #
+        x_col_values = X[:, feature]  #
         assert X.shape[0] == len(x_col_values), "X.shape[0] == len(x_col_values)"
         assert X.shape[0] == len(y), "X.shape[0] == len(y)"
         # print('feature = {0}, X.shape[1] = {1}'.format(feature,X.shape[1]))
@@ -210,10 +265,45 @@ class DecisionTree(BaseEstimator):
         assert X_l.shape[0] + X_r.shape[0] == X.shape[0], "X_l.shape[0] + X_r.shape[0] == X.shape[0]"
         return X_l, X_r, y_l, y_r
 
+    def count_leafs(self):
+        if self.root_node.labels == 'leaf':
+            return 1
+        else:
+            sum = 0
+            if self.left_child is not None:
+                sum += self.left_child.count_leafs()
+            if self.right_child is not None:
+                sum += self.right_child.count_leafs()
+            return sum
+
 
 X, y = load_digits(return_X_y=True)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=17)
-print(X.shape)
-dt = DecisionTree(criterion='gini', max_depth=3)
-q = dt.fit(X_train, y_train)
-print(q)
+# dt = DecisionTree(criterion='gini')
+# q = dt.fit(X_train, y_train)
+
+# tree_params = {'max_depth': list(range(3, 11)), 'criterion': ['gini', 'entropy']}
+# tree_grid = GridSearchCV(dt, tree_params, cv=5, scoring='accuracy')
+# tree_grid.fit(X_train, y_train)
+#
+# from pprint import pprint
+# pprint(vars(tree_grid))
+
+fig = plt.figure()
+plt.xlabel('Max depth')
+plt.ylabel('Mean CV accuracy')
+
+for crit in [ 'entropy' ]:
+    tree_params = {'max_depth': list(range(3, 11)), }
+    tree_grid = GridSearchCV(DecisionTree(criterion=crit), tree_params, cv=5, scoring='accuracy',n_jobs=-1)
+    tree_grid.fit(X_train, y_train)
+
+    plt.plot(tree_params['max_depth'], tree_grid.cv_results_['mean_test_score'])
+
+
+plt.show()
+
+dt = DecisionTree(max_depth=8, criterion='entropy')
+tree = dt.fit(X_train, y_train)
+
+print(tree.predict_proba(X_test))
