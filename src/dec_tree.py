@@ -140,7 +140,7 @@ class DecisionTree(BaseEstimator):
         return self
 
     def predict(self, X):
-
+        
         predictions = []
         for x in X:
 
@@ -162,6 +162,7 @@ class DecisionTree(BaseEstimator):
         return predictions
 
     def predict_proba(self, X):
+        print('caled')
         pass
 
     def _find_splits(self, X):
@@ -217,3 +218,13 @@ print(X.shape)
 dt = DecisionTree(criterion='gini', max_depth=3)
 q = dt.fit(X_train, y_train)
 print(q)
+
+tree_params = {'max_depth': list(range(3, 11)),'criterion': ['gini', 'entropy']}
+tree_grid = GridSearchCV(DecisionTree(max_depth=3), tree_params, cv=5, scoring='accuracy')
+from pprint import pprint
+pprint(vars(tree_grid))
+
+plt.plot(tree_params['max_depth'],
+         tree_grid.cv_results_['mean_test_score'])
+plt.xlabel('Max depth')
+plt.ylabel('Mean CV accuracy');
