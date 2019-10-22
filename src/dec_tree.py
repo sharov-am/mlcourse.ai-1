@@ -5,24 +5,22 @@ from sklearn.base import BaseEstimator
 from sklearn.datasets import make_classification, make_regression, load_digits, load_boston
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import accuracy_score, mean_squared_error
-from scipy.stats import entropy
+
+# from scipy.stats import entropy
 
 RANDOM_STATE = 17
 
 
-def entr(y):
-    return entropy(y)
-    e = 0
-    for v in y:
-        e += -v * np.log2(v)
-    return e
+def entropy(y):
+    y = np.array(y)
+    p = [len(y[y == k]) / len(y) for k in np.unique(y)]
+    return -np.dot(p, np.log2(p))
 
 
 def gini(y):
-    sum = 0
-    for i in y:
-        sum += i ** 2
-    return 1 - sum
+    y = np.array(y)
+    p = [len(y[y == k]) / len(y) for k in np.unique(y)]
+    return 1 - np.dot(p, p)
 
 
 def variance(y):
@@ -93,16 +91,14 @@ class DecisionTree(BaseEstimator):
 
         max_q = float("-inf")
 
-        best_split_value = 0#default
-        best_feature = 0#default
+        best_split_value = 0  # default
+        best_feature = 0  # default
 
         for f in range(X.shape[1]):
             x_col = X[:, f]
             splits = self._find_splits(x_col)
             if len(splits) == 0:
                 continue
-
-
 
             for spl in splits:
 
@@ -243,7 +239,7 @@ class DecisionTree(BaseEstimator):
         # print('feature = {0}, X.shape[1] = {1}'.format(feature,X.shape[1]))
         y_l = [y[i] for i, val in enumerate(x_col_values) if val < t]
         y_r = [y[i] for i, val in enumerate(x_col_values) if val >= t]
-        q = np.var(y) - len(y_l) / len(y) * self.crit(y_l) - len(y_r) / len(y) * self.crit(y_r)
+        q = self.crit(y) - len(y_l) / len(y) * self.crit(y_l) - len(y_r) / len(y) * self.crit(y_r)
 
         assert len(y_l) + len(y_r) == len(y)
         assert len(y_l) != 0 and len(y_r) != 0, "len(y_l) == 0 or len(y_r) == 0"
@@ -289,21 +285,64 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 # from pprint import pprint
 # pprint(vars(tree_grid))
 
-fig = plt.figure()
-plt.xlabel('Max depth')
-plt.ylabel('Mean CV accuracy')
+# tree_params = {'max_depth': list(range(3, 11)),
+#                'criterion': ['gini', 'entropy']}
+#
+# clf = GridSearchCV(DecisionTree(), tree_params, cv=5, scoring='accuracy',
+#                    verbose=True, n_jobs=-1)
+#
+# clf.fit(X_train, y_train)
+#
+# scores = np.array(clf.cv_results_['mean_test_score'])
+# scores = scores.reshape(len(tree_params['criterion']),
+#                         len(tree_params['max_depth']))
+#
+# for ind, i in enumerate(tree_params['criterion']):
+#     plt.plot(tree_params['max_depth'], scores[ind], label=str(i))
+# plt.legend(loc='best')
+# plt.xlabel('max_depth')
+# plt.ylabel('Accuracy')
+# plt.show()
 
-for crit in [ 'entropy' ]:
-    tree_params = {'max_depth': list(range(3, 11)), }
-    tree_grid = GridSearchCV(DecisionTree(criterion=crit), tree_params, cv=5, scoring='accuracy',n_jobs=-1)
-    tree_grid.fit(X_train, y_train)
 
-    plt.plot(tree_params['max_depth'], tree_grid.cv_results_['mean_test_score'])
+# clf = DecisionTree(max_depth=9, criterion='entropy')
+# clf.fit(X_train, y_train)
+# probs = clf.predict_proba(X_test)
+# mean_probs = np.mean(probs, axis=0)
+# print(mean_probs)
 
 
-plt.show()
+X, y = make_classification(n_features=2, n_redundant=0, n_samples=400,
+                          random_state=RANDOM_STATE)
 
-dt = DecisionTree(max_depth=8, criterion='entropy')
-tree = dt.fit(X_train, y_train)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3,
+                                                   random_state=RANDOM_STATE)
 
-print(tree.predict_proba(X_test))
+clf = DecisionTree(max_depth=4, criterion='gini')
+clf.fit(X_train, y_train)
+
+y_pred = clf.predict(X_test)
+prob_pred = clf.predict_proba(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+
+print("Accuracy:", accuracy)
+
+if (sum(np.argmax(prob_pred,axis=1) - y_pred) == 0):
+    print('predict_proba works!')
+
+plt.suptitle("Accuracy = {0:.2f}".format(accuracy))
+plt.subplot(121)
+plt.scatter(X_test[:, 0], X_test[:, 1], c=y_pred, cmap=plt.cm.coolwarm)
+plt.title('Predicted class labels')
+plt.axis('equal')
+plt.subplot(122)
+plt.scatter(X_test[:, 0], X_test[:, 1], c=y_test, cmap=plt.cm.coolwarm)
+plt.title('True class labels')
+plt.axis('equal');
+
+
+
+#dt = DecisionTree(max_depth=8, criterion='entropy')
+#tree = dt.fit(X_train, y_train)
+
+#print(tree.predict_proba(X_test))
